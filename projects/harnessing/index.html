@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Harnessing Diffusion-Generated Synthetic Images for Fair Image Classification</title>
+<meta name="description" content="Fine-tuning Stable Diffusion (LoRA, DreamBooth, Clustered DreamBooth) to generate group-balanced synthetic data for fairer image classifiers. AAAI 2026.">
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,300;8..60,400;8..60,600;8..60,700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --paper: #f7f5f1; --ink: #14171a; --surface: #ffffff; --figbg: #ffffff;
+    --line: #e2ddd4; --line2: #eeeae3; --track: #d6d0c6; --dash: #c2bcb2;
+    --text: #24272b; --text2: #3c3f43; --text3: #5a5d61;
+    --muted: #6b665e; --muted2: #8a847a; --muted3: #b0a99e;
+    --accent: #1d7a52; --hl: rgba(44,168,107,0.07);
+    --code-bg: #14171a; --code-fg: #e8e4dc;
+    --figfilter: none;
+  }
+  [data-theme="dark"] {
+    --paper: #15161a; --ink: #f2efe9; --surface: #1c1e23; --figbg: #f4f2ee;
+    --line: #2f3238; --line2: #26282d; --track: #3a3d43; --dash: #4a4e55;
+    --text: #e6e3dd; --text2: #cbc7c0; --text3: #a9a49b;
+    --muted: #918b82; --muted2: #7f7a71; --muted3: #605c55;
+    --accent: #4ec48a; --hl: rgba(78,196,138,0.13);
+    --code-bg: #0e0f12; --code-fg: #e8e4dc;
+    --figfilter: saturate(0.94) brightness(0.97);
+  }
+  html { scroll-behavior: smooth; background: var(--paper); }
+  html, body { overflow-x: clip; max-width: 100%; }
+  * { box-sizing: border-box; }
+  img { filter: var(--figfilter); max-width: 100%; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: "Source Serif 4", Georgia, serif; -webkit-font-smoothing: antialiased; }
+  html, body, section, figure, nav, header, footer, div, span, p, h1, h2, h3, a, button, pre, img {
+    transition: background-color 380ms ease, color 380ms ease, border-color 380ms ease, filter 380ms ease;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html, body, section, figure, nav, header, footer, div, span, p, h1, h2, h3, a, button, pre, img { transition: none; }
+  }
+  [id] { scroll-margin-top: 86px; }
+  a { color: var(--ink); text-decoration-color: #b8b2a8; text-underline-offset: 3px; }
+  a:hover { color: var(--accent); text-decoration-color: var(--accent); }
+  .author { text-decoration: none; border-bottom: 1px solid var(--track); }
+  .author:hover { color: var(--accent); border-bottom-color: var(--accent); }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+  .sans { font-family: 'IBM Plex Sans', sans-serif; }
+  .katex-display { overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; }
+
+  .rail { position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 25; display: flex; flex-direction: column; gap: 2px; padding: 18px 30px 18px 22px; }
+  @media (max-width: 1240px) { .rail { display: none !important; } }
+  .rail a { display: flex; align-items: center; gap: 10px; text-decoration: none; padding: 4px 2px; opacity: 0.42; transition: opacity 220ms ease; }
+  .rail a:hover, .rail a:focus-visible, .rail a.active { opacity: 1; }
+  .rail .tick { width: 14px; height: 1px; background: var(--muted3); flex: 0 0 auto; transition: width 220ms ease, background-color 220ms ease; }
+  .rail a.active .tick { width: 26px; background: var(--accent); }
+  .rail .label { font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap; color: var(--muted); opacity: 0; transform: translateX(-6px); transition: opacity 220ms ease, transform 220ms ease, color 220ms ease; }
+  .rail a:hover .label, .rail a:focus-visible .label, .rail:hover .label, .rail:focus-within .label { opacity: 1; transform: none; }
+  .rail a.active .label { color: var(--accent); }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 clamp(18px, 5vw, 40px) 120px; }
+  header.hero { display: flex; flex-direction: column; gap: clamp(24px, 3.4vw, 34px); padding: clamp(40px, 6vw, 68px) 0 0; }
+  .top-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .badges { display: flex; align-items: center; gap: 10px 14px; flex-wrap: wrap; min-width: 0; padding-top: 4px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  .badge { display: inline-block; padding: 5px 10px; border: 1px solid var(--ink); color: var(--ink); }
+  .theme-btn { display: inline-flex; align-items: center; gap: 8px; padding: 8px 13px; cursor: pointer; background: transparent; border: 1px solid var(--line); color: var(--muted); font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; }
+  .theme-btn:hover { border-color: var(--ink); color: var(--ink); }
+  h1 { margin: 0; font-size: clamp(30px, 5.6vw, 54px); line-height: 1.08; font-weight: 600; letter-spacing: -0.02em; max-width: 24ch; text-wrap: balance; }
+  .subtitle { margin: 0; max-width: 68ch; font-size: clamp(17px, 2.2vw, 21px); line-height: 1.55; color: var(--text2); }
+  .authors { display: flex; flex-direction: column; gap: 12px; font-size: 18px; }
+  .authors-row { display: flex; flex-wrap: wrap; gap: 4px 22px; line-height: 1.5; }
+  .affil-row { display: flex; flex-wrap: wrap; gap: 4px 20px; font-size: 15px; color: var(--muted); font-family: 'IBM Plex Sans', sans-serif; }
+  .links-row { display: flex; flex-wrap: wrap; gap: 10px; padding-top: 4px; }
+  .btn { display: inline-flex; align-items: center; gap: 9px; padding: 11px 18px; text-decoration: none; font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; border: 1px solid var(--ink); background: transparent; color: var(--ink); }
+  .btn-primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+  .btn-primary:hover { background: var(--accent); color: var(--paper); border-color: var(--accent); }
+  .btn:not(.btn-primary):hover { background: var(--ink); color: var(--paper); }
+  .btn .tag { font-family: 'IBM Plex Mono', monospace; opacity: 0.6; }
+
+  .affil-strip { display: flex; align-items: center; gap: 20px 30px; flex-wrap: wrap; margin: 44px 0 0; padding: 20px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); font-family: 'IBM Plex Sans', sans-serif; font-size: 15px; color: var(--muted); }
+  .affil-strip span.inst { display: inline-flex; align-items: center; padding: 6px 12px; border: 1px solid var(--line); color: var(--text2); }
+
+  section.block { padding: clamp(48px, 7vw, 76px) 0 0; }
+  .section-label { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--muted); margin-bottom: 26px; }
+  figure { margin: 0; }
+  figure img { width: 100%; display: block; background: var(--figbg); border: 1px solid var(--line); }
+  figcaption { margin: 16px 0 0; font-size: 15px; line-height: 1.6; color: var(--text3); max-width: 92ch; font-family: 'IBM Plex Sans', sans-serif; }
+
+  .grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: clamp(28px, 4vw, 56px); align-items: start; }
+  .body-col { display: flex; flex-direction: column; gap: 18px; font-size: clamp(16px, 2vw, 19px); line-height: 1.62; color: var(--text); }
+  .feature-list { display: flex; flex-direction: column; border-top: 2px solid var(--ink); }
+  .feature-item { display: flex; flex-direction: column; gap: 6px; padding: 20px 0; border-bottom: 1px solid var(--line); }
+  .feature-k { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+  .feature-v { font-size: 17px; line-height: 1.5; color: var(--text); }
+
+  h3.h { margin: 0; font-size: clamp(21px, 2.6vw, 25px); font-weight: 600; letter-spacing: -0.01em; }
+  .formula-box { background: var(--surface); border: 1px solid var(--line); padding: 26px 24px 22px; display: flex; flex-direction: column; gap: 18px; overflow-x: auto; }
+  .formula-box .eq { font-size: 17px; color: var(--ink); }
+  .formula-box .note { font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; line-height: 1.6; color: var(--muted2); }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); border: 1px solid var(--line); }
+  .stat-cell { background: var(--surface); padding: 20px; display: flex; flex-direction: column; gap: 4px; }
+  .stat-num { font-family: 'IBM Plex Mono', monospace; font-size: 28px; font-weight: 500; }
+  .stat-lab { font-size: 14px; color: var(--muted); font-family: 'IBM Plex Sans', sans-serif; }
+
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+  .toggle-btn { padding: 10px 15px; min-height: 40px; font-family: 'IBM Plex Sans', sans-serif; font-size: 13px; font-weight: 500; cursor: pointer; border: 1px solid var(--ink); background: transparent; color: var(--ink); }
+  .toggle-btn.active { background: var(--ink); color: var(--paper); }
+
+  .data-table { border-top: 2px solid var(--ink); overflow-x: auto; }
+  .t-head, .t-row { display: grid; align-items: baseline; min-width: 620px; }
+  .t-head { padding: 12px 0; border-bottom: 1px solid var(--ink); font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .t-row { padding: 14px 0; border-bottom: 1px solid var(--line); font-size: 16px; }
+  .t-row.hl { background: var(--hl); }
+  .t-row.ours .t-name, .t-row.hl .t-name { font-weight: 600; }
+  .t-cell { text-align: right; font-family: 'IBM Plex Mono', monospace; font-size: 14.5px; }
+  .t-name { font-weight: 400; }
+  .t-sub { font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted3); padding: 10px 0 4px; }
+  .res-cols { grid-template-columns: 1.9fr 0.75fr 0.75fr 0.75fr 0.75fr; }
+  .res-cols .t-cell:first-of-type { border-left: 1px dashed var(--line2); padding-left: 12px; }
+  .cost-cols { grid-template-columns: 1.7fr 1fr 0.7fr 0.7fr; }
+  .abl-cols { grid-template-columns: 1fr 0.7fr 0.7fr; }
+  .gdro-cols { grid-template-columns: 1.6fr 0.8fr 0.8fr; }
+
+  .code-block { position: relative; background: var(--code-bg); color: var(--code-fg); padding: 56px 26px 26px; overflow-x: auto; }
+  .copy-btn { position: absolute; top: 16px; right: 18px; padding: 7px 13px; background: transparent; border: 1px solid #4a4e53; color: #cfc9c0; font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; cursor: pointer; }
+  .code-block pre { margin: 0; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; line-height: 1.75; white-space: pre-wrap; overflow-wrap: break-word; }
+
+  footer.site { margin-top: 76px; padding-top: 26px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 24px; flex-wrap: wrap; font-family: 'IBM Plex Sans', sans-serif; font-size: 14px; color: var(--muted); }
+
+  @media (max-width: 760px) {
+    .res-cols { grid-template-columns: 1.5fr 0.62fr 0.72fr 0.72fr 0.72fr !important; gap: 6px; }
+    .cost-cols { grid-template-columns: 1.4fr 0.9fr 0.7fr 0.7fr !important; gap: 6px; }
+    .t-head { font-size: 9px !important; }
+    .t-row { font-size: 13.5px !important; padding: 12px 0 !important; }
+    .t-cell { font-size: 12px !important; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="rail" aria-label="Sections" data-rail>
+  <a href="#top" data-target="top"><span class="tick"></span><span class="label">Top</span></a>
+  <a href="#problem" data-target="problem"><span class="tick"></span><span class="label">Problem</span></a>
+  <a href="#abstract" data-target="abstract"><span class="tick"></span><span class="label">Abstract</span></a>
+  <a href="#method" data-target="method"><span class="tick"></span><span class="label">Method</span></a>
+  <a href="#biasgen" data-target="biasgen"><span class="tick"></span><span class="label">Severe bias</span></a>
+  <a href="#cost" data-target="cost"><span class="tick"></span><span class="label">Cost vs. gain</span></a>
+  <a href="#results" data-target="results"><span class="tick"></span><span class="label">Results</span></a>
+  <a href="#qualitative" data-target="qualitative"><span class="tick"></span><span class="label">Qualitative</span></a>
+  <a href="#ablations" data-target="ablations"><span class="tick"></span><span class="label">Ablations</span></a>
+  <a href="#bibtex" data-target="bibtex"><span class="tick"></span><span class="label">BibTeX</span></a>
+</nav>
+
+<div class="wrap">
+
+  <header class="hero" id="top">
+    <div class="top-row">
+      <a href="../../index.html" class="mono" style="font-size:12.5px; letter-spacing:0.08em; text-transform:uppercase; text-decoration:none; color:var(--muted); align-self:center;">&larr; Abhipsa Basu</a>
+      <button type="button" class="theme-btn" id="themeBtn" title="Toggle theme">
+        <span id="themeIcon">&#9789;</span><span id="themeLabel">Dark</span>
+      </button>
+    </div>
+    <div class="badges">
+      <span class="badge">AAAI 2026</span>
+      <span>Fair Image Classification &middot; Diffusion Models</span>
+    </div>
+
+    <h1>Harnessing Diffusion-Generated Synthetic Images for Fair Image Classification</h1>
+
+    <p class="subtitle">Fine-tuning Stable Diffusion directly on each biased training group &mdash; via LoRA, DreamBooth, and a new <strong>Clustered DreamBooth</strong> &mdash; generates group-balanced synthetic data that trains fairer classifiers than prompt-only generation. <strong style="font-weight:600">Clustered DreamBooth reaches 79.1% worst-group accuracy</strong> on average across three benchmarks, beating Group-DRO by up to <strong style="font-weight:600">60.7 points</strong> on Waterbirds once dataset bias becomes severe.</p>
+
+    <div class="authors">
+      <div class="authors-row">
+        <span>Abhipsa Basu<sup style="color:var(--muted)">1</sup></span>
+        <span>Aviral Gupta<sup style="color:var(--muted)">2</sup></span>
+        <span>Abhijnya Bhat<sup style="color:var(--muted)">3</sup></span>
+        <span>R. Venkatesh Babu<sup style="color:var(--muted)">1</sup></span>
+      </div>
+      <div class="affil-row">
+        <span><sup>1</sup> Indian Institute of Science, Bangalore</span>
+        <span><sup>2</sup> BITS Pilani</span>
+        <span><sup>3</sup> Stanford University</span>
+      </div>
+    </div>
+
+    <div class="links-row">
+      <a class="btn btn-primary" href="https://arxiv.org/abs/2511.08711" target="_blank" rel="noopener"><span class="tag">arXiv</span> 2511.08711</a>
+      <a class="btn" href="assets/Harnessing_Diffusion_Synthetic_Images.pdf" target="_blank" rel="noopener"><span class="tag" style="opacity:.5">PDF</span> Paper</a>
+      <a class="btn" href="https://github.com/abhipsabasu/harnessing_diff_models" target="_blank" rel="noopener"><span class="tag" style="opacity:.7">&lt;/&gt;</span> Code</a>
+      <a class="btn" href="#bibtex"><span class="tag" style="opacity:.5">{}</span> BibTeX</a>
+    </div>
+  </header>
+
+  <div class="affil-strip">
+    <a href="https://iisc.ac.in/" target="_blank" rel="noopener" style="text-decoration:none"><span class="inst">Indian Institute of Science</span></a>
+    <a href="https://www.bits-pilani.ac.in/" target="_blank" rel="noopener" style="text-decoration:none"><span class="inst">BITS Pilani</span></a>
+    <a href="https://www.stanford.edu/" target="_blank" rel="noopener" style="text-decoration:none"><span class="inst">Stanford University</span></a>
+  </div>
+
+  <section class="block" id="problem">
+    <div class="section-label">01 &nbsp;/&nbsp; The problem: generative models don't know your dataset</div>
+    <figure>
+      <img src="assets/fig1-generation-approaches.jpg" alt="Four generation pipelines: Vanilla SD, LoRA-finetuned, DreamBooth, and Clustered DreamBooth, each producing a Blond Male image from a text prompt or training images." />
+      <figcaption>Prompting vanilla Stable Diffusion with a group description (e.g. &ldquo;photo of a blond male person&rdquo;) drifts from the true data distribution. Fine-tuning the diffusion model directly on each training group &mdash; via LoRA, DreamBooth, or per-cluster DreamBooth &mdash; keeps generations in-distribution while still representing the target group.</figcaption>
+    </figure>
+  </section>
+
+  <section class="block" id="abstract">
+    <div class="section-label">02 &nbsp;/&nbsp; Abstract</div>
+    <div class="grid-2">
+      <div class="body-col">
+        <p style="margin:0">Image classification systems often inherit biases from uneven group representation in training data &mdash; e.g. in face datasets for hair-color classification, blond hair may be disproportionately associated with females, reinforcing stereotypes. A recent approach, FFR, leverages Stable Diffusion (SD) to generate balanced training data, but such prompt-only models often struggle to preserve the original data distribution.</p>
+        <p style="margin:0">We explore multiple diffusion-finetuning techniques &mdash; <strong>LoRA</strong> and <strong>DreamBooth</strong> &mdash; to generate images that more accurately represent each training group by learning directly from its samples. To prevent a single DreamBooth model from being overwhelmed by excessive intra-group variation, we introduce <strong>Clustered DreamBooth</strong>: clustering images within each group and training a separate DreamBooth model per cluster.</p>
+        <p style="margin:0">These models generate group-balanced data for pretraining a classifier, which is then fine-tuned on real data. Across three fairness benchmarks, the studied fine-tuning approaches outperform vanilla Stable Diffusion on average, and achieve results comparable to SOTA debiasing techniques like Group-DRO &mdash; while surpassing them as dataset bias severity increases.</p>
+      </div>
+      <div class="feature-list">
+        <div class="feature-item">
+          <div class="feature-k">Two-stage pipeline</div>
+          <div class="feature-v">Pretrain on group-balanced synthetic images, then fine-tune only the softmax layer on the real, biased dataset &mdash; no full-network hyperparameter tuning.</div>
+        </div>
+        <div class="feature-item">
+          <div class="feature-k">Clustered DreamBooth</div>
+          <div class="feature-v">A pool of per-cluster DreamBooth models captures intra-group diversity that a single DreamBooth model overwrites.</div>
+        </div>
+        <div class="feature-item">
+          <div class="feature-k">Robust under severe bias</div>
+          <div class="feature-v">Traditional debiasing (Group-DRO, SELF) collapses at a 0.999 bias ratio; generative pretraining degrades far more gracefully.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="method">
+    <div class="section-label">03 &nbsp;/&nbsp; Method</div>
+    <figure style="margin:0 0 44px">
+      <img src="assets/fig2-pipeline-overview.jpg" alt="Two-stage pipeline: Stage 1 pretrains a classifier on group-balanced generated data; Stage 2 finetunes only the linear classifier on the original biased data." style="padding:16px 0" />
+      <figcaption>Stage 1 generates images uniformly across every group (e.g. non-blond female, non-blond male, blond female, blond male) and pretrains a classifier with CE + SupCon losses. Stage 2 freezes the feature encoder and fine-tunes only the linear classifier on the original biased dataset.</figcaption>
+    </figure>
+
+    <div class="grid-2">
+      <div class="body-col">
+        <h3 class="h">Four generation strategies</h3>
+        <p style="margin:0;font-size:18px;line-height:1.6;color:var(--text2)"><strong>Vanilla SD</strong> generates from class + bias labels alone &mdash; independent of the training data, so it can drift out-of-distribution. <strong>LoRA-finetuning</strong> fine-tunes SD on each training group separately, making the generator aware of the data. <strong>DreamBooth</strong> goes further, binding a group to a unique identifier token (&ldquo;[V]&rdquo;) for stronger resemblance to real samples.</p>
+        <p style="margin:0;font-size:18px;line-height:1.6;color:var(--text2)"><strong>Clustered DreamBooth</strong> addresses a failure mode of plain DreamBooth: a group like &ldquo;Blond Male&rdquo; contains many individuals sharing only one trait. We cluster each group's CLIP embeddings into <span class="mono">k</span> subsets and train a separate DreamBooth model per cluster, so no single model is overwhelmed by intra-group variation.</p>
+        <div class="formula-box">
+          <div class="eq">$$\text{CLIP-Score}(I,p_c,\bar z_g) = \alpha \cdot \text{CLIP-Label}(I,p_c) + (1-\alpha)\cdot \text{CLIP-Centroid}(I,\bar z_g)$$</div>
+          <div class="note">CLIP-Label scores image&ndash;text similarity to the class prompt; CLIP-Centroid scores similarity to the group's CLIP-embedding centroid. The top 75% of generated images by this combined score are kept for training.</div>
+        </div>
+      </div>
+      <div class="body-col">
+        <h3 class="h">Two-stage training objective</h3>
+        <p style="margin:0;font-size:18px;line-height:1.6;color:var(--text2)">Both the pretraining stage (on generated data) and the fine-tuning stage (on real data) optimize a weighted combination of Cross-Entropy and Supervised Contrastive loss, which sharpens class separation in the learned features.</p>
+        <div class="formula-box">
+          <div class="eq">$$\mathcal{L}_{CE} = -\frac{1}{|X|}\sum_{i=1}^{|X|}\sum_{j=1}^{|Y|} p_{ij}\log \hat p_{ij}$$</div>
+          <div class="eq" style="padding-top:2px;border-top:1px solid var(--line2)">$$\mathcal{L} = \beta \cdot \mathcal{L}_{CE} + (1-\beta)\cdot \mathcal{L}_{\text{sup-con}}, \quad \beta = 0.5$$</div>
+          <div class="note">Stage 2 freezes the pretrained feature encoder <span class="mono">e<sup>pre</sup></span> and fine-tunes only the linear classifier <span class="mono">c<sup>pre</sup></span> &mdash; full-network fine-tuning risks reintroducing the original dataset bias.</div>
+        </div>
+        <p style="margin:0;font-size:16px;line-height:1.6;color:var(--text3)">Evaluated on Waterbirds, CelebA (Blond Hair), and UTKFace (Gender vs. Age), reporting worst-group (WGA) and average-group (AGA) accuracy following prior work.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="biasgen">
+    <div class="section-label">04 &nbsp;/&nbsp; Generating bias-conflicting samples under severe bias</div>
+    <div class="grid-2">
+      <figure>
+        <img src="assets/fig3-style-transfer.jpg" alt="A DreamBooth model trained on Blond Females generates Blond Males by swapping the gender token in the prompt and removing the learned [V] identifier token, with a negative prompt suppressing the female attribute." />
+        <figcaption>At a 0.999 bias ratio, a training group like Blond Male has almost no real samples. Removing the learned &ldquo;[V]&rdquo; identifier from the prompt of a model trained on the bias-aligned group (Blond Females) &mdash; while swapping the attribute word and adding a negative prompt &mdash; transfers the group's visual style onto the target group.</figcaption>
+      </figure>
+      <div class="body-col">
+        <p style="margin:0">When we push the bias ratio to <strong>0.999</strong> (99.9% of training images from bias-aligned groups), diffusion models must generate the minority groups largely from scratch. For Vanilla SD and FFR this just means prompting with the bias and class labels. For LoRA, DreamBooth, and Clustered DreamBooth &mdash; which rely on training-group images &mdash; bias-conflicting samples (e.g. Blond Males in CelebA) are instead generated from the model trained on the corresponding bias-aligned group (Blond Females).</p>
+        <p style="margin:0">On manual inspection, dropping the learned identifier token during this cross-group generation produces images that visually follow the source group's distribution while depicting the target group &mdash; a simple, training-free way to reach severely under-represented groups.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="cost">
+    <div class="section-label">05 &nbsp;/&nbsp; Accuracy vs. time complexity</div>
+    <p style="margin:0 0 22px;font-size:clamp(16px,2vw,19px);line-height:1.6;color:var(--text2);max-width:76ch">Averaged across all three datasets and both bias ratios: each fine-tuning step buys measurable worst-group accuracy, at the cost of training more per-group diffusion models. Clustered DreamBooth's cluster count <span class="mono">k<sub>D</sub></span> can be dialed down to trade fidelity for compute &mdash; <span class="mono">k<sub>D</sub>=1</span> recovers plain DreamBooth.</p>
+    <div class="data-table">
+      <div class="t-head cost-cols">
+        <div>Method</div>
+        <div>Time complexity</div>
+        <div style="text-align:right">WGA&uarr;</div>
+        <div style="text-align:right">AGA&uarr;</div>
+      </div>
+      <div class="t-row cost-cols"><div class="t-name">Vanilla SD</div><div class="mono" style="color:var(--text3)">O(1)</div><div class="t-cell">71.3</div><div class="t-cell">82.6</div></div>
+      <div class="t-row cost-cols"><div class="t-name">LoRA-finetuning</div><div class="mono" style="color:var(--text3)">O(|G<sub>D</sub>|)</div><div class="t-cell">72.8</div><div class="t-cell">85.4</div></div>
+      <div class="t-row cost-cols"><div class="t-name">DreamBooth</div><div class="mono" style="color:var(--text3)">O(|G<sub>D</sub>|)</div><div class="t-cell">76.2</div><div class="t-cell">84.8</div></div>
+      <div class="t-row cost-cols hl ours"><div class="t-name">Clustered DreamBooth</div><div class="mono" style="color:var(--text3)">O(|G<sub>D</sub>|&middot;k<sub>D</sub>)</div><div class="t-cell">79.1</div><div class="t-cell">86.2</div></div>
+    </div>
+  </section>
+
+  <section class="block" id="results">
+    <div class="section-label">06 &nbsp;/&nbsp; Quantitative results</div>
+    <p style="margin:0 0 22px;font-size:clamp(16px,2vw,19px);line-height:1.6;color:var(--text2);max-width:76ch">Worst-group (WGA) and average-group (AGA) accuracy on the original dataset and its 0.999 bias-ratio variant. <span class="mono">&dagger;</span> uses the original authors' codebase; generative methods use no bias annotations besides group balancing.</p>
+    <div class="btn-row" id="datasetBtns">
+      <button type="button" class="toggle-btn active" data-dataset="Waterbirds">Waterbirds</button>
+      <button type="button" class="toggle-btn" data-dataset="CelebA">CelebA</button>
+      <button type="button" class="toggle-btn" data-dataset="UTKFace">UTKFace</button>
+    </div>
+    <div class="data-table">
+      <div class="t-head res-cols">
+        <div>Method</div>
+        <div style="text-align:right">Orig. WGA</div>
+        <div style="text-align:right">Orig. AGA</div>
+        <div style="text-align:right">0.999 WGA</div>
+        <div style="text-align:right">0.999 AGA</div>
+      </div>
+      <div id="resultsBody"></div>
+    </div>
+    <p class="sans" style="margin:16px 0 0;font-size:15px;line-height:1.6;color:var(--text3);max-width:92ch">Clustered DreamBooth achieves the highest worst-group accuracy averaged across all datasets (79.1%). At the 0.999 bias ratio, GDRO and SELF collapse (e.g. 23.5% and 25.5% WGA on Waterbirds) while generative pretraining stays within &sim;7% of its original-dataset performance.</p>
+  </section>
+
+  <section class="block" id="qualitative">
+    <div class="section-label">07 &nbsp;/&nbsp; Qualitative analysis</div>
+    <figure style="margin-bottom:44px">
+      <img src="assets/fig4-training-vs-generated.jpg" alt="Grid of real training images (red border) and Clustered DreamBooth generations (yellow border) for every group across Waterbirds, CelebA, and UTKFace." />
+      <figcaption>Real training images (red border) alongside Clustered DreamBooth generations (yellow border) for every group across all three datasets. Generated images closely track both the group attribute and the domain-specific visual style of each dataset.</figcaption>
+    </figure>
+    <div class="grid-2">
+      <figure>
+        <img src="assets/fig5-dreambooth-vs-clustered.jpg" alt="DreamBooth generations of UTKFace female children are visually narrow; Clustered DreamBooth generations span a wider range of demographics, backgrounds, and settings." />
+        <figcaption>DreamBooth vs. Clustered DreamBooth for UTKFace &ldquo;Female Children&rdquo;. A single DreamBooth model narrows toward one demographic and setting; clustering first lets each sub-model specialize, so the pool covers far more of the group's real diversity.</figcaption>
+      </figure>
+      <div class="body-col">
+        <p style="margin:0">This diversity gap explains why plain DreamBooth underperforms on UTKFace (Table 1): with a wide within-group age and background range, a single model averages toward a narrow mode instead of representing the full group.</p>
+        <p style="margin:0">Clustered DreamBooth's advantage is largest exactly where intra-group variation is highest &mdash; facial datasets with varied demographics, lighting, and pose &mdash; and smallest on Waterbirds, where DreamBooth already attains the top worst-group accuracy on the original dataset.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="ablations">
+    <div class="section-label">08 &nbsp;/&nbsp; Design choices &amp; ablations</div>
+    <div class="grid-2">
+      <div>
+        <h3 class="h" style="margin-bottom:16px">CLIP-Score weighting &alpha;</h3>
+        <p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:var(--text2)">&alpha;=1 uses only image&ndash;text label similarity; &alpha;=0 uses only similarity to the group centroid. &alpha;=0.5 (used in the main results) balances both and performs best on most datasets, beating unscored random sampling.</p>
+        <div class="data-table">
+          <div class="t-head gdro-cols"><div>Selection</div><div style="text-align:right">WB WGA</div><div style="text-align:right">CelebA WGA</div></div>
+          <div class="t-row gdro-cols"><div class="t-name">&alpha; = 1</div><div class="t-cell">87.0</div><div class="t-cell">83.8</div></div>
+          <div class="t-row gdro-cols"><div class="t-name">&alpha; = 0</div><div class="t-cell">84.7</div><div class="t-cell">83.3</div></div>
+          <div class="t-row gdro-cols hl ours"><div class="t-name">&alpha; = 0.5 (used)</div><div class="t-cell">88.1</div><div class="t-cell">84.1</div></div>
+          <div class="t-row gdro-cols"><div class="t-name">Random sampling</div><div class="t-cell">84.9</div><div class="t-cell">81.1</div></div>
+        </div>
+      </div>
+      <div>
+        <h3 class="h" style="margin-bottom:16px">Generative pretraining + GDRO fine-tuning</h3>
+        <p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:var(--text2)">At a 0.999 bias ratio, fine-tuning a Clustered-DreamBooth-pretrained model with the GDRO loss (instead of plain last-layer retraining) lifts worst-group accuracy by <strong>+58.3</strong> points on Waterbirds and <strong>+37.2</strong> on CelebA over GDRO alone &mdash; showing the two approaches are complementary.</p>
+        <div class="data-table">
+          <div class="t-head gdro-cols"><div>Method</div><div style="text-align:right">Waterbirds WGA</div><div style="text-align:right">CelebA WGA</div></div>
+          <div class="t-row gdro-cols"><div class="t-name">GDRO alone</div><div class="t-cell">23.5</div><div class="t-cell">27.2</div></div>
+          <div class="t-row gdro-cols hl ours"><div class="t-name">Clustered DreamBooth + GDRO</div><div class="t-cell">81.8</div><div class="t-cell">64.4</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="block" id="conclusion">
+    <div class="section-label">09 &nbsp;/&nbsp; Conclusion</div>
+    <p style="margin:0;font-size:clamp(16px,2vw,19px);line-height:1.65;color:var(--text2);max-width:80ch">We investigated Stable Diffusion fine-tuning &mdash; LoRA and DreamBooth &mdash; for generating representative, group-balanced training images, and introduced Clustered DreamBooth to address intra-group diversity. Pretraining a classifier on this synthetic data, then fine-tuning only its softmax layer on real data, consistently outperforms vanilla SD and FFR, and matches or exceeds SOTA debiasing methods like Group-DRO &mdash; especially as dataset bias becomes severe. Optimizing the cluster count and combining generative pretraining with debiasing losses like GDRO remain open directions.</p>
+  </section>
+
+  <section class="block" id="bibtex">
+    <div class="section-label">10 &nbsp;/&nbsp; BibTeX</div>
+    <div class="code-block">
+      <button type="button" class="copy-btn" id="copyBtn">Copy</button>
+      <pre id="bibtexText">@inproceedings{basu2026harnessing,
+  title     = {Harnessing Diffusion-Generated Synthetic Images for Fair Image Classification},
+  author    = {Basu, Abhipsa and Gupta, Aviral and Bhat, Abhijnya and Babu, R. Venkatesh},
+  booktitle = {Proceedings of the AAAI Conference on Artificial Intelligence},
+  year      = {2026},
+  note      = {arXiv:2511.08711}
+}</pre>
+    </div>
+  </section>
+
+  <footer class="site">
+    <span>AAAI 2026 &middot; Indian Institute of Science, Bangalore</span>
+    <span><a href="https://github.com/abhipsabasu/harnessing_diff_models" target="_blank" rel="noopener">Code on GitHub</a></span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var RESULTS = {
+    Waterbirds: [
+      { name: 'ERM', synthetic: false, ow: '63.7', oa: '88.0', bw: '29.0', ba: '66.7' },
+      { name: 'FFR †', synthetic: true, ow: '69.5', oa: '84.0', bw: '57.3', ba: '84.2' },
+      { name: 'Vanilla SD', synthetic: true, ow: '74.6', oa: '80.5', bw: '69.9', ba: '80.1' },
+      { name: 'LoRA-finetuning', synthetic: true, ow: '86.5', oa: '89.9', bw: '61.5', ba: '84.0' },
+      { name: 'DreamBooth', synthetic: true, ow: '89.3', oa: '90.1', bw: '82.4', ba: '88.3' },
+      { name: 'Clustered DreamBooth', synthetic: true, ow: '88.1', oa: '90.2', bw: '84.2', ba: '88.5', ours: true },
+      { name: 'GDRO †', synthetic: false, ow: '91.4', oa: '93.5', bw: '23.5', ba: '65.5' },
+      { name: 'SELF †', synthetic: false, ow: '93.0', oa: '94.0', bw: '25.5', ba: '64.2' }
+    ],
+    CelebA: [
+      { name: 'ERM', synthetic: false, ow: '47.8', oa: '94.9', bw: '31.7', ba: '67.3' },
+      { name: 'FFR †', synthetic: true, ow: '68.9', oa: '85.7', bw: '22.8', ba: '47.7' },
+      { name: 'Vanilla SD', synthetic: true, ow: '76.4', oa: '84.2', bw: '77.1', ba: '84.7' },
+      { name: 'LoRA-finetuning', synthetic: true, ow: '82.3', oa: '87.2', bw: '73.5', ba: '83.2' },
+      { name: 'DreamBooth', synthetic: true, ow: '82.1', oa: '87.9', bw: '78.8', ba: '84.6' },
+      { name: 'Clustered DreamBooth', synthetic: true, ow: '84.1', oa: '88.4', bw: '81.8', ba: '85.9', ours: true },
+      { name: 'GDRO †', synthetic: false, ow: '88.9', oa: '92.9', bw: '27.2', ba: '75.2' },
+      { name: 'SELF †', synthetic: false, ow: '83.9', oa: '91.1', bw: '45.6', ba: '95.4' }
+    ],
+    UTKFace: [
+      { name: 'ERM', synthetic: false, ow: '74.3', oa: '84.5', bw: '31.0', ba: '48.9' },
+      { name: 'FFR †', synthetic: true, ow: '67.4', oa: '81.4', bw: '55.0', ba: '68.0' },
+      { name: 'Vanilla SD', synthetic: true, ow: '62.0', oa: '83.3', bw: '67.8', ba: '82.7' },
+      { name: 'LoRA-finetuning', synthetic: true, ow: '68.6', oa: '85.6', bw: '64.5', ba: '82.4' },
+      { name: 'DreamBooth', synthetic: true, ow: '57.9', oa: '80.9', bw: '66.9', ba: '77.1' },
+      { name: 'Clustered DreamBooth', synthetic: true, ow: '76.0', oa: '83.5', bw: '60.5', ba: '80.8', ours: true },
+      { name: 'GDRO †', synthetic: false, ow: '81.6', oa: '85.9', bw: '30.5', ba: '50.3' },
+      { name: 'SELF †', synthetic: false, ow: '65.9', oa: '82.3', bw: '0.6', ba: '50.5' }
+    ]
+  };
+
+  function renderResults(dataset) {
+    var body = document.getElementById('resultsBody');
+    var rows = RESULTS[dataset];
+    body.innerHTML = rows.map(function (r) {
+      var cls = 't-row res-cols' + (r.ours ? ' hl ours' : '');
+      return '<div class="' + cls + '">' +
+        '<div class="t-name">' + r.name + (r.synthetic ? '' : '') + '</div>' +
+        '<div class="t-cell">' + r.ow + '</div>' +
+        '<div class="t-cell">' + r.oa + '</div>' +
+        '<div class="t-cell">' + r.bw + '</div>' +
+        '<div class="t-cell">' + r.ba + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  document.getElementById('datasetBtns').addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-dataset]');
+    if (!btn) return;
+    document.querySelectorAll('#datasetBtns .toggle-btn').forEach(function (b) { b.classList.remove('active'); });
+    btn.classList.add('active');
+    renderResults(btn.getAttribute('data-dataset'));
+  });
+  renderResults('Waterbirds');
+
+  var copyBtn = document.getElementById('copyBtn');
+  copyBtn.addEventListener('click', function () {
+    var text = document.getElementById('bibtexText').textContent;
+    navigator.clipboard.writeText(text).then(function () {
+      copyBtn.textContent = 'Copied';
+      setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1600);
+    });
+  });
+
+  var themeBtn = document.getElementById('themeBtn');
+  var themeIcon = document.getElementById('themeIcon');
+  var themeLabel = document.getElementById('themeLabel');
+  function applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    themeIcon.textContent = t === 'dark' ? '☀' : '☽';
+    themeLabel.textContent = t === 'dark' ? 'Light' : 'Dark';
+    try { localStorage.setItem('site-theme', t); } catch (e) {}
+  }
+  var saved = null;
+  try { saved = localStorage.getItem('site-theme'); } catch (e) {}
+  if (!saved) saved = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  applyTheme(saved);
+  themeBtn.addEventListener('click', function () {
+    applyTheme(document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark');
+  });
+
+  var railLinks = Array.prototype.slice.call(document.querySelectorAll('.rail a'));
+  var ids = railLinks.map(function (a) { return a.getAttribute('data-target'); });
+  function onScroll() {
+    var mid = window.innerHeight * 0.35;
+    var cur = ids[0];
+    ids.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el && el.getBoundingClientRect().top <= mid) cur = id;
+    });
+    railLinks.forEach(function (a) { a.classList.toggle('active', a.getAttribute('data-target') === cur); });
+  }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  function typeset() {
+    if (window.renderMathInElement) {
+      window.renderMathInElement(document.body, {
+        delimiters: [{ left: '$$', right: '$$', display: true }, { left: '$', right: '$', display: false }],
+        throwOnError: false
+      });
+    } else {
+      setTimeout(typeset, 150);
+    }
+  }
+  typeset();
+})();
+</script>
+</body>
+</html>
